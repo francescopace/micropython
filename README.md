@@ -1,3 +1,33 @@
+<div align="center">
+
+## ⚠️ About this fork
+
+</div>
+
+> **📌 Fork Information**
+> 
+> This fork was originally created to develop Wi-Fi CSI (Channel State
+> Information) support for the ESP32 port of MicroPython.
+>
+> The CSI support was merged upstream in
+> [micropython/micropython#18460](https://github.com/micropython/micropython/pull/18460),
+> merged into `master` on 2026-06-26 and targeted for `release-1.29.0`.
+>
+> This fork remains active to maintain additional ESP32-specific changes that are
+> not part of upstream MicroPython, such as gain lock support and other
+> fork-specific enhancements.
+>
+> **Branch structure:**
+> - `master`: kept synchronized with the upstream MicroPython repository.
+> - `main`: the default development branch for fork-specific changes beyond what
+>   is available upstream.
+> - `esp32-add-csi-module`: the historical branch used for the upstream CSI pull
+>   request.
+>
+> This fork maintains the same MIT license as the original MicroPython project.
+
+---
+
 [![Unix CI badge](https://github.com/micropython/micropython/actions/workflows/ports_unix.yml/badge.svg)](https://github.com/micropython/micropython/actions?query=branch%3Amaster+event%3Apush) [![STM32 CI badge](https://github.com/micropython/micropython/actions/workflows/ports_stm32.yml/badge.svg)](https://github.com/micropython/micropython/actions?query=branch%3Amaster+event%3Apush) [![Docs CI badge](https://github.com/micropython/micropython/actions/workflows/docs.yml/badge.svg)](https://docs.micropython.org/) [![codecov](https://codecov.io/gh/micropython/micropython/branch/master/graph/badge.svg?token=I92PfD05sD)](https://codecov.io/gh/micropython/micropython)
 
 The MicroPython project
@@ -9,6 +39,12 @@ The MicroPython project
 This is the MicroPython project, an implementation of Python 3.x for
 microcontrollers, embedded systems and other constrained platforms.
 You can find the official website at [micropython.org](http://www.micropython.org).
+
+=======
+---
+
+WARNING: this project is in beta stage and is subject to changes of the
+code-base, including project-wide name changes and API changes.
 
 MicroPython implements the entire Python 3.4 syntax (including exceptions,
 `with`, `yield from`, etc., and additionally `async`/`await` keywords from

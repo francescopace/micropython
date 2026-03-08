@@ -145,9 +145,15 @@ Methods
    reconnects     Number of reconnect attempts to make (integer, 0=none, -1=unlimited)
    txpower        Maximum transmit power in dBm (integer or float)
    pm             WiFi Power Management setting (see below for allowed values)
-   protocol       (ESP32 Only.) WiFi Low level 802.11 protocol. See `WLAN.PROTOCOL_DEFAULT`.
-   bandwidth      (ESP32 Only.) WiFi channel bandwidth. See `WLAN.BANDWIDTH_20` and others.
+   protocol       (ESP32 Only.) WiFi Low level 802.11 protocol. See `WLAN.PROTOCOL_DEFAULT` and protocol mode constants.
+   bandwidth      (ESP32 Only.) WiFi channel bandwidth. See `WLAN.BW_HT20` and `WLAN.BW_HT40`.
+   band_mode      (ESP32 Only.) WiFi band mode. See `WLAN.BAND_MODE_2G_ONLY`, `WLAN.BAND_MODE_5G_ONLY`, and `WLAN.BAND_MODE_AUTO`.
+   promiscuous    (ESP32 Only.) Enable promiscuous mode (boolean). Captures packets from all sources, not just connected AP.
    =============  ===========
+
+   On dual-band targets (for example ESP32-C5), ``band_mode`` can switch between
+   2.4GHz-only, 5GHz-only, and AUTO. ESP32-C6 is 2.4GHz-only in hardware, so
+   requesting 5GHz-only or AUTO may raise ``OSError``.
 
 CSI Methods (ESP32 only)
 ------------------------
@@ -315,3 +321,39 @@ network interface parameter:
 .. _ESP-IDF Wi-Fi Protocols: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/wifi.html#wi-fi-protocol-mode
 .. _Espressif proprietary "long-range" mode:
 .. _Espressif long-range documentation: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/wifi.html#long-range-lr
+
+
+ESP32 Bandwidth Constants
+-------------------------
+
+The following ESP32-only constants relate to the ``WLAN.config(bandwidth=...)``
+network interface parameter:
+
+.. data:: WLAN.BW_HT20
+
+      20MHz channel bandwidth (HT20). This is the recommended setting for CSI
+      capture as it provides more stable measurements than HT40.
+
+.. data:: WLAN.BW_HT40
+
+      40MHz channel bandwidth (HT40). Provides higher throughput but may be
+      less stable for CSI applications.
+
+
+ESP32 Band Mode Constants
+-------------------------
+
+The following ESP32-only constants relate to the ``WLAN.config(band_mode=...)``
+network interface parameter:
+
+.. data:: WLAN.BAND_MODE_2G_ONLY
+
+      Use 2.4GHz-only operation.
+
+.. data:: WLAN.BAND_MODE_5G_ONLY
+
+      Use 5GHz-only operation (supported on dual-band targets such as ESP32-C5).
+
+.. data:: WLAN.BAND_MODE_AUTO
+
+      Use both 2.4GHz and 5GHz bands where supported.

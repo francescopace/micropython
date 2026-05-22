@@ -31,10 +31,13 @@ Replace `/dev/ttyUSB0` with the serial device for your board.
 
 ### `csi_basic.py`
 
-Connects to Wi-Fi, enables CSI, and prints basic frame information.
+Connects to Wi-Fi, enables CSI, and prints basic frame information including
+the current AGC/FFT gain samples returned by each CSI frame.
 
 ### `csi_turbulence_monitor.py`
 
 Reads CSI frames and computes a simple turbulence metric from selected
-subcarriers.
+subcarriers. On targets that support it, this example also calibrates and locks
+the AGC/FFT gain before starting the turbulence loop so the amplitude readings
+are more stable.
 

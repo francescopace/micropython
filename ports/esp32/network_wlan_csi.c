@@ -33,6 +33,7 @@
 
 #if MICROPY_PY_NETWORK_WLAN_CSI
 
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "network_wlan_csi.h"
@@ -71,6 +72,8 @@ typedef struct {
     uint8_t secondary_channel : 2;
     uint8_t ant : 2;
     uint8_t _reserved : 1;
+    uint8_t agc_gain;
+    int8_t fft_gain;
     uint8_t mac[6];
     int8_t data[CSI_MAX_DATA_LEN];
 } csi_frame_t;
@@ -84,6 +87,35 @@ typedef struct {
     uint16_t buffer_size;
     volatile uint32_t dropped;
 } csi_state_t;
+
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6
+#define WIFI_CSI_GAIN_LOCK_SUPPORTED (1)
+extern void phy_fft_scale_force(bool force_en, int8_t force_value);
+extern void phy_force_rx_gain(int force_en, int force_value);
+
+typedef struct {
+    unsigned : 32;
+    unsigned : 32;
+    unsigned : 32;
+    unsigned : 32;
+    unsigned : 32;
+    unsigned : 16;
+    signed fft_gain : 8;
+    unsigned agc_gain : 8;
+    unsigned : 32;
+    unsigned : 32;
+    #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6
+    unsigned : 32;
+    unsigned : 32;
+    unsigned : 32;
+    #endif
+    unsigned : 32;
+} wifi_pkt_rx_ctrl_phy_t;
+#else
+#define WIFI_CSI_GAIN_LOCK_SUPPORTED (0)
+#endif
+
+static const char *TAG = "wifi_csi";
 
 static csi_state_t *wifi_csi_get_state(void) {
     csi_state_t *state = (csi_state_t *)MP_STATE_PORT(csi_state);
@@ -132,6 +164,16 @@ static void IRAM_ATTR wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     frame.local_timestamp = info->rx_ctrl.timestamp;
     frame.sig_len = info->rx_ctrl.sig_len;
     frame.rx_state = info->rx_ctrl.rx_state;
+
+    #if WIFI_CSI_GAIN_LOCK_SUPPORTED
+    const wifi_pkt_rx_ctrl_phy_t *phy_info = (const wifi_pkt_rx_ctrl_phy_t *)info;
+    frame.agc_gain = phy_info->agc_gain;
+    frame.fft_gain = phy_info->fft_gain;
+    #else
+    frame.agc_gain = 0;
+    frame.fft_gain = 0;
+    #endif
+
     memcpy(frame.mac, info->mac, sizeof(frame.mac));
     frame.timestamp_us = (uint32_t)esp_timer_get_time();
 
@@ -274,7 +316,7 @@ static mp_obj_tuple_t *network_wlan_csi_get_result_tuple(mp_obj_t result_in) {
     }
 
     mp_obj_tuple_t *result = MP_OBJ_TO_PTR(result_in);
-    if (result->len != 22) {
+    if (result->len != 24) {
         mp_raise_ValueError(MP_ERROR_TEXT("result tuple has wrong size"));
     }
 
@@ -355,7 +397,7 @@ static mp_obj_t network_wlan_csi_read(size_t n_args, const mp_obj_t *args) {
     if (n_args > 1 && args[1] != mp_const_none) {
         result = network_wlan_csi_get_result_tuple(args[1]);
     } else {
-        result = MP_OBJ_TO_PTR(mp_obj_new_tuple(22, NULL));
+        result = MP_OBJ_TO_PTR(mp_obj_new_tuple(24, NULL));
         result->items[5] = mp_const_none;
     }
 
@@ -384,6 +426,8 @@ static mp_obj_t network_wlan_csi_read(size_t n_args, const mp_obj_t *args) {
     result->items[19] = MP_OBJ_NEW_SMALL_INT(frame.ant);
     result->items[20] = MP_OBJ_NEW_SMALL_INT(frame.sig_len);
     result->items[21] = MP_OBJ_NEW_SMALL_INT(frame.rx_state);
+    result->items[22] = MP_OBJ_NEW_SMALL_INT(frame.agc_gain);
+    result->items[23] = MP_OBJ_NEW_SMALL_INT(frame.fft_gain);
     return MP_OBJ_FROM_PTR(result);
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(network_wlan_csi_read_obj, 1, 2, network_wlan_csi_read);
@@ -409,6 +453,49 @@ static mp_obj_t network_wlan_csi_available(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(available / sizeof(csi_frame_t));
 }
 MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_available_obj, network_wlan_csi_available);
+
+static mp_obj_t network_wlan_csi_force_gain(mp_obj_t self_in, mp_obj_t agc_obj, mp_obj_t fft_obj) {
+    (void)self_in;
+
+    #if WIFI_CSI_GAIN_LOCK_SUPPORTED
+    if (agc_obj == mp_const_none && fft_obj == mp_const_none) {
+        phy_force_rx_gain(0, 0);
+        phy_fft_scale_force(false, 0);
+        ESP_LOGI(TAG, "Gain lock disabled");
+    } else if (agc_obj == mp_const_none || fft_obj == mp_const_none) {
+        mp_raise_ValueError(MP_ERROR_TEXT("set both agc and fft"));
+    } else {
+        int agc = mp_obj_get_int(agc_obj);
+        int fft = mp_obj_get_int(fft_obj);
+        if (agc < 0 || agc > 255) {
+            mp_raise_ValueError(MP_ERROR_TEXT("agc must be 0-255"));
+        }
+        if (fft < -128 || fft > 127) {
+            mp_raise_ValueError(MP_ERROR_TEXT("fft must be -128 to 127"));
+        }
+        phy_fft_scale_force(true, (int8_t)fft);
+        phy_force_rx_gain(1, agc);
+        ESP_LOGI(TAG, "Gain locked: AGC=%d FFT=%d", agc, fft);
+    }
+    return mp_const_none;
+    #else
+    (void)agc_obj;
+    (void)fft_obj;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("not supported on ESP32/ESP32-S2"));
+    return mp_const_none;
+    #endif
+}
+MP_DEFINE_CONST_FUN_OBJ_3(network_wlan_csi_force_gain_obj, network_wlan_csi_force_gain);
+
+static mp_obj_t network_wlan_csi_gain_lock_supported(mp_obj_t self_in) {
+    (void)self_in;
+    #if WIFI_CSI_GAIN_LOCK_SUPPORTED
+    return mp_const_true;
+    #else
+    return mp_const_false;
+    #endif
+}
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_gain_lock_supported_obj, network_wlan_csi_gain_lock_supported);
 
 MP_REGISTER_ROOT_POINTER(void *csi_state);
 

@@ -65,10 +65,12 @@ def connect_wifi():
 def main():
     # Create WLAN interface
     wlan = connect_wifi()
+    gain_lock_supported = wlan.csi_gain_lock_supported()
 
     print("\n" + "=" * 50)
     print("CSI Basic Example")
     print("=" * 50)
+    print(f"\nGain lock supported: {gain_lock_supported}")
 
     print("\n⚠️  IMPORTANT: CSI requires active Wi-Fi traffic directed to this device.")
     print("   Generate traffic from another device using:")
@@ -96,6 +98,8 @@ def main():
                     print(f"  Timestamp: {frame[3]} us")  # timestamp
                     print(f"  Rate: {frame[6]}")  # rate
                     print(f"  MCS: {frame[8]}")  # mcs
+                    print(f"  AGC gain: {frame[22]}")  # agc_gain
+                    print(f"  FFT gain: {frame[23]}")  # fft_gain
 
                     # Display first few CSI samples
                     csi_data = frame[5]  # data

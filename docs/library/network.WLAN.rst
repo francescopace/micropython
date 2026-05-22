@@ -241,6 +241,8 @@ station capture.
    * **19 - ant** (int): Antenna
    * **20 - sig_len** (int): Signal length
    * **21 - rx_state** (int): RX state
+   * **22 - agc_gain** (int): AGC gain sample used by the Wi-Fi PHY
+   * **23 - fft_gain** (int): FFT gain sample used by the Wi-Fi PHY
 
    Some metadata fields may be ``0`` on targets where ESP-IDF does not provide
    the corresponding value in the public CSI receive structure.
@@ -255,6 +257,24 @@ station capture.
    Frames are dropped when the buffer is full and new frames arrive faster than
    they can be read. Increase ``buffer_size`` in ``csi_enable()`` to reduce
    drops.
+
+.. method:: WLAN.csi_force_gain(agc, fft)
+
+   Force fixed AGC and FFT gain values for CSI capture.
+
+   Pass both arguments as integers to enable gain lock, or pass ``None`` for
+   both arguments to re-enable automatic gain control.
+
+   This method is supported on ESP32-S3, ESP32-C3, ESP32-C5, and ESP32-C6. On
+   ESP32 and ESP32-S2 it raises ``NotImplementedError``.
+
+   The values returned by `WLAN.csi_read()` in tuple fields ``22`` and ``23``
+   can be used to choose stable gain values from previously captured frames.
+
+.. method:: WLAN.csi_gain_lock_supported()
+
+   Return ``True`` if `WLAN.csi_force_gain()` is supported on the current
+   target, otherwise return ``False``.
 
 Constants
 ---------

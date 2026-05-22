@@ -32,6 +32,7 @@ import gc
 WIFI_SSID = "your-ssid"  # CHANGE THESE!
 WIFI_PASSWORD = "your-password"  # CHANGE THESE!
 CSI_BUFFER_SIZE = 16
+GAIN_CALIBRATION_FRAMES = 300
 SELECTED_SUBCARRIERS = [47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58]
 
 
@@ -96,15 +97,43 @@ def calculate_turbulence(csi_data, subcarriers):
     return math.sqrt(max(0.0, variance))
 
 
+def maybe_lock_gain(wlan):
+    """Calibrate and lock gain on supported targets."""
+    if not wlan.csi_gain_lock_supported():
+        print("Gain lock not supported on this target, continuing with AGC enabled.\n")
+        return None
+
+    print(f"Calibrating gain from the first {GAIN_CALIBRATION_FRAMES} CSI frames...")
+    agc_samples = []
+    fft_samples = []
+    frame = None
+
+    while len(agc_samples) < GAIN_CALIBRATION_FRAMES:
+        frame = wlan.csi_read(frame)
+        if frame:
+            agc_samples.append(frame[22])
+            fft_samples.append(frame[23])
+        else:
+            time.sleep_ms(10)
+
+    agc_samples.sort()
+    fft_samples.sort()
+    agc = agc_samples[len(agc_samples) // 2]
+    fft = fft_samples[len(fft_samples) // 2]
+    wlan.csi_force_gain(agc, fft)
+    print(f"Gain locked: AGC={agc}, FFT={fft}\n")
+    return frame
+
+
 def main():
     print("\n" + "=" * 60)
     print("Turbulence Monitor")
     print("=" * 60 + "\n")
 
     wlan = connect_wifi()
+    frame = maybe_lock_gain(wlan)
 
     packets = 0
-    frame = None
     csi_length_logged = False
     print("Starting CSI processing...\n")
 

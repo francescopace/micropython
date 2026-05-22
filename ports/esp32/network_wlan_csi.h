@@ -31,7 +31,6 @@
 #include "py/obj.h"
 
 #if MICROPY_PY_NETWORK_WLAN_CSI
-
 void wifi_csi_deinit(void);
 
 MP_DECLARE_CONST_FUN_OBJ_KW(network_wlan_csi_enable_obj);
@@ -39,6 +38,8 @@ MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_disable_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(network_wlan_csi_read_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_dropped_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_available_obj);
+MP_DECLARE_CONST_FUN_OBJ_3(network_wlan_csi_force_gain_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_gain_lock_supported_obj);
 
 #endif // MICROPY_PY_NETWORK_WLAN_CSI
 

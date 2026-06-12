@@ -192,6 +192,21 @@
 #ifndef MICROPY_PY_NETWORK_WLAN
 #define MICROPY_PY_NETWORK_WLAN             (1)
 #endif
+#ifndef MICROPY_PY_NETWORK_WLAN_CSI
+#ifdef CONFIG_ESP_WIFI_CSI_ENABLED
+// CSI support is compiled in via sdkconfig.csi or another board-specific sdkconfig.
+#define MICROPY_PY_NETWORK_WLAN_CSI         (1)
+#else
+// CSI disabled by default to reduce firmware size
+#define MICROPY_PY_NETWORK_WLAN_CSI         (0)
+#endif
+#endif
+#if MICROPY_PY_NETWORK_WLAN_CSI
+// CSI_DEFAULT_BUFFER_SIZE is used in network_wlan_csi.c
+#ifndef MICROPY_PY_NETWORK_WLAN_CSI_DEFAULT_BUFFER_SIZE
+#define MICROPY_PY_NETWORK_WLAN_CSI_DEFAULT_BUFFER_SIZE (16)
+#endif
+#endif
 #ifndef MICROPY_HW_ENABLE_SDCARD
 #define MICROPY_HW_ENABLE_SDCARD            (1)
 #endif

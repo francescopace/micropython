@@ -38,6 +38,7 @@ MP_DECLARE_CONST_FUN_OBJ_KW(network_wlan_csi_enable_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_disable_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(network_wlan_csi_read_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_dropped_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_callbacks_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_available_obj);
 
 #endif // MICROPY_PY_NETWORK_WLAN_CSI

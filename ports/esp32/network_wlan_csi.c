@@ -37,6 +37,7 @@
 #include "esp_wifi.h"
 #include "network_wlan_csi.h"
 #include "modnetwork.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -75,14 +76,14 @@ typedef struct {
     int8_t data[CSI_MAX_DATA_LEN];
 } csi_frame_t;
 
-// ringbuf_t uses uint16_t for the byte size, so keep the Python-visible limit
-// within the maximum addressable ringbuffer capacity.
-#define CSI_MAX_BUFFER_SIZE ((UINT16_MAX - 1) / sizeof(csi_frame_t))
+#define CSI_FRAME_SIZE(max_data_len) (offsetof(csi_frame_t, data) + (max_data_len))
 
 typedef struct {
     ringbuf_t ringbuffer;
     uint16_t buffer_size;
+    uint16_t max_data_len;
     volatile uint32_t dropped;
+    volatile uint32_t callbacks;
 } csi_state_t;
 
 static csi_state_t *wifi_csi_get_state(void) {
@@ -99,12 +100,15 @@ static csi_state_t *wifi_csi_get_state(void) {
 static void IRAM_ATTR wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     (void)ctx;
 
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
     csi_state_t *state = (csi_state_t *)MP_STATE_PORT(csi_state);
     if (state == NULL || state->ringbuffer.buf == NULL) {
+        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return;
     }
 
-    // Keep this static to avoid putting a large frame on the ISR stack.
+    state->callbacks++;
+    // Keep this static to avoid putting a large frame on the Wi-Fi task stack.
     static csi_frame_t frame;
 
     #if WIFI_CSI_RXCTRL_V2
@@ -136,15 +140,17 @@ static void IRAM_ATTR wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     frame.timestamp_us = (uint32_t)esp_timer_get_time();
 
     if (info->buf != NULL && info->len > 0) {
-        frame.len = info->len > CSI_MAX_DATA_LEN ? CSI_MAX_DATA_LEN : info->len;
+        frame.len = info->len > state->max_data_len ? state->max_data_len : info->len;
         memcpy(frame.data, info->buf, frame.len);
     } else {
         frame.len = 0;
     }
 
-    if (ringbuf_put_bytes(&state->ringbuffer, (uint8_t *)&frame, sizeof(frame)) != 0) {
+    size_t frame_size = CSI_FRAME_SIZE(state->max_data_len);
+    if (ringbuf_put_bytes(&state->ringbuffer, (uint8_t *)&frame, frame_size) != 0) {
         state->dropped++;
     }
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
 }
 
 #if WIFI_CSI_RXCTRL_V2
@@ -180,6 +186,19 @@ static void wifi_csi_build_config(wifi_csi_config_t *config) {
 }
 #endif
 
+static void wifi_csi_release_ring(csi_state_t *state) {
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    uint8_t *ring_buffer = state->ringbuffer.buf;
+    size_t ring_size = state->ringbuffer.size;
+    state->ringbuffer.buf = NULL;
+    state->ringbuffer.size = 0;
+    ringbuf_reset(&state->ringbuffer);
+    state->dropped = 0;
+    state->callbacks = 0;
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
+    m_del(uint8_t, ring_buffer, ring_size);
+}
+
 static esp_err_t wifi_csi_enable(csi_state_t *state) {
     if (state->ringbuffer.buf != NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -193,23 +212,26 @@ static esp_err_t wifi_csi_enable(csi_state_t *state) {
         return err;
     }
 
-    ringbuf_alloc(&state->ringbuffer, sizeof(csi_frame_t) * state->buffer_size);
+    size_t frame_size = CSI_FRAME_SIZE(state->max_data_len);
+    size_t ring_size = frame_size * state->buffer_size + 1;
+    ringbuf_alloc(&state->ringbuffer, ring_size);
     state->dropped = 0;
+    state->callbacks = 0;
 
     err = esp_wifi_set_csi_rx_cb(wifi_csi_rx_cb, NULL);
     if (err != ESP_OK) {
-        m_del(uint8_t, state->ringbuffer.buf, state->ringbuffer.size);
-        state->ringbuffer.buf = NULL;
-        state->ringbuffer.size = 0;
+        wifi_csi_release_ring(state);
         return err;
     }
 
     err = esp_wifi_set_csi(true);
     if (err != ESP_OK) {
-        esp_wifi_set_csi_rx_cb(NULL, NULL);
-        m_del(uint8_t, state->ringbuffer.buf, state->ringbuffer.size);
-        state->ringbuffer.buf = NULL;
-        state->ringbuffer.size = 0;
+        // Only release the ring if the driver no longer retains its context.
+        // Otherwise keep the rooted allocation alive for a later disable or
+        // deinit attempt rather than creating a use-after-free.
+        if (esp_wifi_set_csi_rx_cb(NULL, NULL) == ESP_OK) {
+            wifi_csi_release_ring(state);
+        }
         return err;
     }
 
@@ -222,21 +244,17 @@ static esp_err_t wifi_csi_disable(csi_state_t *state) {
     }
 
     esp_err_t err = esp_wifi_set_csi(false);
-    if (err != ESP_OK) {
+    if (err == ESP_OK) {
+        err = esp_wifi_set_csi_rx_cb(NULL, NULL);
+    }
+
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED && err != ESP_ERR_WIFI_NOT_INIT) {
+        // Keep the state allocated so a later csi_disable() can retry instead
+        // of incorrectly treating capture as already disabled.
         return err;
     }
 
-    err = esp_wifi_set_csi_rx_cb(NULL, NULL);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    m_del(uint8_t, state->ringbuffer.buf, state->ringbuffer.size);
-    state->ringbuffer.buf = NULL;
-    state->ringbuffer.size = 0;
-    state->ringbuffer.iget = 0;
-    state->ringbuffer.iput = 0;
-    state->dropped = 0;
+    wifi_csi_release_ring(state);
     return ESP_OK;
 }
 
@@ -246,14 +264,19 @@ void wifi_csi_deinit(void) {
         return;
     }
 
+    // The callback resolves the state through this root while holding the same
+    // atomic lock. Clear the root before reclaiming memory so even a callback
+    // retained by a failing ESP-IDF teardown cannot access freed allocations.
+    wifi_csi_disable(state);
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    MP_STATE_PORT(csi_state) = NULL;
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
+
     if (state->ringbuffer.buf != NULL) {
-        esp_wifi_set_csi(false);
-        esp_wifi_set_csi_rx_cb(NULL, NULL);
-        m_del(uint8_t, state->ringbuffer.buf, state->ringbuffer.size);
+        wifi_csi_release_ring(state);
     }
 
     m_del_obj(csi_state_t, state);
-    MP_STATE_PORT(csi_state) = NULL;
 }
 
 static bool wifi_csi_read_frame(csi_frame_t *frame) {
@@ -263,7 +286,8 @@ static bool wifi_csi_read_frame(csi_frame_t *frame) {
     }
 
     mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
-    int result = ringbuf_get_bytes(&state->ringbuffer, (uint8_t *)frame, sizeof(*frame));
+    int result = ringbuf_get_bytes(
+        &state->ringbuffer, (uint8_t *)frame, CSI_FRAME_SIZE(state->max_data_len));
     MICROPY_END_ATOMIC_SECTION(atomic_state);
     return result == 0;
 }
@@ -305,15 +329,23 @@ static mp_obj_array_t *network_wlan_csi_update_data(mp_obj_t *data_obj, const cs
 static mp_obj_t network_wlan_csi_enable(size_t n_args, const mp_obj_t *args, mp_map_t *kw_args) {
     (void)args[0];
 
+    enum { ARG_buffer_size, ARG_max_data_len };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_buffer_size, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = MICROPY_PY_NETWORK_WLAN_CSI_DEFAULT_BUFFER_SIZE} },
+        { MP_QSTR_max_data_len, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = CSI_MAX_DATA_LEN} },
     };
 
     mp_arg_val_t parsed_args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args - 1, args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, parsed_args);
 
-    mp_int_t buffer_size = parsed_args[0].u_int;
-    if (buffer_size < 1 || buffer_size > CSI_MAX_BUFFER_SIZE) {
+    mp_int_t max_data_len = parsed_args[ARG_max_data_len].u_int;
+    if (max_data_len < 1 || max_data_len > CSI_MAX_DATA_LEN) {
+        mp_raise_ValueError(MP_ERROR_TEXT("max_data_len out of range"));
+    }
+
+    size_t max_buffer_size = (UINT16_MAX - 1) / CSI_FRAME_SIZE(max_data_len);
+    mp_int_t buffer_size = parsed_args[ARG_buffer_size].u_int;
+    if (buffer_size < 1 || (size_t)buffer_size > max_buffer_size) {
         mp_raise_ValueError(MP_ERROR_TEXT("buffer_size out of range"));
     }
 
@@ -322,6 +354,7 @@ static mp_obj_t network_wlan_csi_enable(size_t n_args, const mp_obj_t *args, mp_
         esp_exceptions(ESP_ERR_INVALID_STATE);
     }
     state->buffer_size = buffer_size;
+    state->max_data_len = max_data_len;
     esp_exceptions(wifi_csi_enable(state));
     return mp_const_none;
 }
@@ -379,9 +412,16 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(network_wlan_csi_read_obj, 1, 2, network_wla
 static mp_obj_t network_wlan_csi_dropped(mp_obj_t self_in) {
     (void)self_in;
     csi_state_t *state = (csi_state_t *)MP_STATE_PORT(csi_state);
-    return mp_obj_new_int(state == NULL ? 0 : state->dropped);
+    return mp_obj_new_int_from_uint(state == NULL ? 0 : state->dropped);
 }
 MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_dropped_obj, network_wlan_csi_dropped);
+
+static mp_obj_t network_wlan_csi_callbacks(mp_obj_t self_in) {
+    (void)self_in;
+    csi_state_t *state = (csi_state_t *)MP_STATE_PORT(csi_state);
+    return mp_obj_new_int_from_uint(state == NULL ? 0 : state->callbacks);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_callbacks_obj, network_wlan_csi_callbacks);
 
 static mp_obj_t network_wlan_csi_available(mp_obj_t self_in) {
     (void)self_in;
@@ -392,9 +432,9 @@ static mp_obj_t network_wlan_csi_available(mp_obj_t self_in) {
     }
 
     mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
-    size_t available = ringbuf_avail(&state->ringbuffer);
+    size_t available = ringbuf_avail(&state->ringbuffer) / CSI_FRAME_SIZE(state->max_data_len);
     MICROPY_END_ATOMIC_SECTION(atomic_state);
-    return MP_OBJ_NEW_SMALL_INT(available / sizeof(csi_frame_t));
+    return MP_OBJ_NEW_SMALL_INT(available);
 }
 MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_available_obj, network_wlan_csi_available);
 

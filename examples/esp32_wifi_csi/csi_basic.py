@@ -19,8 +19,9 @@ Usage:
 Author: Francesco Pace <francesco.pace@gmail.com>
 """
 
-import network
 import time
+
+import network
 
 # WiFi credentials - CHANGE THESE!
 WIFI_SSID = "your-ssid"
@@ -52,7 +53,7 @@ def connect_wifi():
         timeout -= 1
 
     if not wlan.isconnected():
-        raise Exception("WiFi connection failed")
+        raise OSError("WiFi connection failed")
 
     print(f"✅ Connected - IP: {wlan.ifconfig()[0]}")
 
@@ -112,10 +113,13 @@ def main():
 
     except KeyboardInterrupt:
         print("\n\nStopping CSI capture...")
+        callbacks = wlan.csi_callbacks()
+        dropped = wlan.csi_dropped()
         wlan.csi_disable()
         print("CSI disabled")
-        print(f"\nTotal frames captured: {frame_count}")
-        print(f"Total dropped: {wlan.csi_dropped()}")
+        print(f"\nTotal receive callbacks: {callbacks}")
+        print(f"Total frames read: {frame_count}")
+        print(f"Total dropped: {dropped}")
 
 
 if __name__ == "__main__":

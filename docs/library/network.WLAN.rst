@@ -166,14 +166,17 @@ will be captured.
 Other Espressif CSI options are hard-coded to defaults intended for connected
 station capture.
 
-.. method:: WLAN.csi_enable(buffer_size=16)
+.. method:: WLAN.csi_enable(buffer_size=16, max_data_len=512)
 
    Enable CSI capture and allocate a circular buffer for received frames.
 
    The optional ``buffer_size`` argument sets the number of frames stored before
    new incoming frames are dropped. Larger values reduce drops at the cost of RAM. The
-   exact maximum depends on the build, but it is limited by the underlying
-   ringbuffer implementation to roughly 100 frames.
+   exact maximum depends on ``max_data_len`` and the underlying ringbuffer size.
+
+   The optional ``max_data_len`` argument limits the CSI payload retained per
+   frame and must be between 1 and 512 bytes. Smaller values reduce RAM and copy
+   work but truncate longer payloads returned by ``csi_read()``.
 
    Raises ``OSError`` if CSI cannot be enabled, for example if Wi-Fi is not
    active or the ESP-IDF rejects the configuration.
@@ -192,7 +195,7 @@ station capture.
       while not wlan.isconnected():
           time.sleep_ms(100)
 
-      wlan.csi_enable(buffer_size=32)
+      wlan.csi_enable(buffer_size=32, max_data_len=256)
 
 .. method:: WLAN.csi_disable()
 
@@ -249,6 +252,12 @@ station capture.
    Frames are dropped when the buffer is full and new frames arrive faster than
    they can be read. Increase ``buffer_size`` in ``csi_enable()`` to reduce
    drops.
+
+.. method:: WLAN.csi_callbacks()
+
+   Get the number of CSI receive callbacks since capture was enabled, including
+   frames dropped because the buffer was full. The counter is reset by
+   ``csi_enable()`` and ``csi_disable()``.
 
 Constants
 ---------

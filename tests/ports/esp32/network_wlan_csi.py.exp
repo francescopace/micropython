@@ -1,0 +1,8 @@
+initial 0 0 0
+buffer_size=0 ValueError
+buffer_size=65535 ValueError
+max_data_len=0 ValueError
+max_data_len=513 ValueError
+enabled True True True
+disabled 0 0 0
+idempotent

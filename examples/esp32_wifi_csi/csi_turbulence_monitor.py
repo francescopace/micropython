@@ -23,15 +23,17 @@ Usage:
 Author: Francesco Pace <francesco.pace@gmail.com>
 """
 
-import network
-import time
-import math
 import gc
+import math
+import time
+
+import network
 
 # Configuration
 WIFI_SSID = "your-ssid"  # CHANGE THESE!
 WIFI_PASSWORD = "your-password"  # CHANGE THESE!
 CSI_BUFFER_SIZE = 16
+CSI_MAX_DATA_LEN = 128
 SELECTED_SUBCARRIERS = [47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58]
 
 
@@ -59,12 +61,12 @@ def connect_wifi():
         timeout -= 1
 
     if not wlan.isconnected():
-        raise Exception("WiFi connection failed")
+        raise OSError("WiFi connection failed")
 
     print(f"✅ Connected - IP: {wlan.ifconfig()[0]}")
 
-    wlan.csi_enable(buffer_size=CSI_BUFFER_SIZE)
-    print(f"✅ CSI enabled (buffer: {CSI_BUFFER_SIZE})\n")
+    wlan.csi_enable(buffer_size=CSI_BUFFER_SIZE, max_data_len=CSI_MAX_DATA_LEN)
+    print(f"✅ CSI enabled (buffer: {CSI_BUFFER_SIZE}, data: {CSI_MAX_DATA_LEN} bytes)\n")
 
     return wlan
 
@@ -120,9 +122,6 @@ def main():
                 if not csi_length_logged:
                     print(f"ℹ️  CSI data length: {data_len} bytes ({data_len // 2} subcarriers)\n")
                     csi_length_logged = True
-
-                # Use only first 128 bytes (or less if data is shorter)
-                csi_data = csi_data[:128]
 
                 turbulence = calculate_turbulence(csi_data, SELECTED_SUBCARRIERS)
 

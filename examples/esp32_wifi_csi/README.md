@@ -36,4 +36,5 @@ Connects to Wi-Fi, enables CSI, and prints basic frame information.
 ### `csi_turbulence_monitor.py`
 
 Reads CSI frames and computes a simple turbulence metric from selected
-subcarriers.
+subcarriers. It retains only the first 128 bytes of each CSI payload, reducing
+buffer memory and copy work because the metric does not use the remaining data.
